@@ -8,6 +8,7 @@
 //  - https://github.com/itead/ITEADLIB_Arduino_Nextion/blob/master/NexUpload.cpp
 //  - https://github.com/MMMZZZZ/Nexus/blob/master/Nexus.py
 //  - https://nextion.tech/instruction-set/
+#define BUFFER_SIZE 1024
 
 #include "nspanel_lovelace.h"
 
@@ -60,7 +61,7 @@ static const char *const TAG = "nspanel_lovelace_upload";
 int NSPanelLovelace::upload_by_chunks_(esp_http_client_handle_t http_client, uint32_t &range_start) {
   uint32_t range_size = this->tft_size_ - range_start;
   ESP_LOGD(TAG, "Free heap: %" PRIu32, esp_get_free_heap_size());
-  uint32_t range_end = ((this->upload_first_chunk_sent_ || this->tft_size_ < 4096) ? this->tft_size_ : 4096) - 1;
+  uint32_t range_end = ((this->upload_first_chunk_sent_ || this->tft_size_ < BUFFER_SIZE) ? this->tft_size_ : BUFFER_SIZE) - 1;
   ESP_LOGD(TAG, "Range start: %" PRIu32, range_start);
   if (range_size <= 0 || range_end <= range_start) {
     ESP_LOGD(TAG, "Range end: %" PRIu32, range_end);
@@ -86,7 +87,7 @@ int NSPanelLovelace::upload_by_chunks_(esp_http_client_handle_t http_client, uin
 
   // Allocate the buffer dynamically
   ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
-  uint8_t *buffer = allocator.allocate(4096);
+  uint8_t *buffer = allocator.allocate(BUFFER_SIZE);
   if (!buffer) {
     ESP_LOGE(TAG, "Failed to allocate upload buffer");
     return -1;
@@ -97,7 +98,7 @@ int NSPanelLovelace::upload_by_chunks_(esp_http_client_handle_t http_client, uin
     App.feed_wdt();
     yield();
     const uint16_t buffer_size =
-        this->content_length_ < 4096 ? this->content_length_ : 4096;  // Limits buffer to the remaining data
+        this->content_length_ < BUFFER_SIZE ? this->content_length_ : BUFFER_SIZE;  // Limits buffer to the remaining data
     ESP_LOGV(TAG, "Fetching %" PRIu16 " bytes from HTTP", buffer_size);
     uint16_t read_len = 0;
     int partial_read_len = 0;
@@ -124,7 +125,7 @@ int NSPanelLovelace::upload_by_chunks_(esp_http_client_handle_t http_client, uin
       ESP_LOGE(TAG, "Failed to read full package, received only %" PRIu16 " of %" PRIu16 " bytes, retries %" PRIi16 ", errno %" PRIi16 ", done %" PRIu8, read_len,
                buffer_size, retries, esp_http_client_get_errno(http_client), esp_http_client_is_complete_data_received(http_client));
       // Deallocate buffer
-      allocator.deallocate(buffer, 4096);
+      allocator.deallocate(buffer, BUFFER_SIZE);
       buffer = nullptr;
       return -1;
     }
@@ -173,14 +174,14 @@ int NSPanelLovelace::upload_by_chunks_(esp_http_client_handle_t http_client, uin
           range_start = range_end + 1;
         }
         // Deallocate buffer
-        allocator.deallocate(buffer, 4096);
+        allocator.deallocate(buffer, BUFFER_SIZE);
         buffer = nullptr;
         return range_end + 1;
       } else if (recv_string[0] != 0x05 && recv_string[0] != 0x08) {  // 0x05 == "ok"
         ESP_LOGE(TAG, "Invalid response from Nextion: [%s]",
                  format_hex_pretty(reinterpret_cast<const uint8_t *>(recv_string.data()), recv_string.size()).c_str());
         // Deallocate buffer
-        allocator.deallocate(buffer, 4096);
+        allocator.deallocate(buffer, BUFFER_SIZE);
         buffer = nullptr;
         return -1;
       }
@@ -196,7 +197,7 @@ int NSPanelLovelace::upload_by_chunks_(esp_http_client_handle_t http_client, uin
   }
   range_start = range_end + 1;
   // Deallocate buffer
-  allocator.deallocate(buffer, 4096);
+  allocator.deallocate(buffer, BUFFER_SIZE);
   buffer = nullptr;
   return range_end + 1;
 }
@@ -314,7 +315,7 @@ bool NSPanelLovelace::upload_tft(const std::string &url /*, uint32_t baud_rate*/
   this->tft_size_ = esp_http_client_get_content_length(http_client);
 
   ESP_LOGD(TAG, "TFT file size: %zu bytes", this->tft_size_);
-  if (this->tft_size_ < 4096 || this->tft_size_ > 134217728) {
+  if (this->tft_size_ < BUFFER_SIZE || this->tft_size_ > 134217728) {
     ESP_LOGE(TAG, "File size check failed.");
     ESP_LOGD(TAG, "Close HTTP connection");
     esp_http_client_close(http_client);
